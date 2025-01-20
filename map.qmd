@@ -1,0 +1,244 @@
+---
+title: "FDS: Mapping refugee population"
+format: html
+editor: source
+---
+  
+  Script to produce a map showing countries that are relevant to the FDS.
+
+
+## Preparation
+
+Load packages
+```{r}
+library(refugees)
+library(wbstats)
+library(ggplot2)
+library(unhcrthemes)
+library(dplyr)
+library(tidyverse)
+library(scales)
+library(sf)
+library(showtext)
+library(patchwork)
+library(httr)
+library(jsonlite)
+library(ggrepel)
+library(ggsflabel)
+
+# Add UNHCR font
+font_add("Lato", regular = "C:/Windows/Fonts/Lato/Lato-Medium.ttf") 
+showtext_auto()  
+```
+Import and prepare data
+```{r}
+# Import refugee data. For this refugees packages, but this does not include mid-year data. Therefore downloading from API - just need to change year.
+year <- 2024
+
+# ref <- refugees::population |>
+#   filter(year == year)
+
+data <- GET(paste0("https://api.unhcr.org/population/v1/population/?limit=500&coa_all=TRUE&year=", year)) |>
+  content(as = "parsed", type = "application/json")
+
+ref <- bind_rows(lapply(data$items, function(x) {
+  as.data.frame(lapply(x, as.character), stringsAsFactors = FALSE)
+})) |>
+  mutate(across(c(refugees:hst), as.numeric))
+
+# Import map data
+poly_url <- "https://raw.githubusercontent.com/GDS-ODSSS/unhcr-dataviz-platform/master/data/geospatial/world_polygons_simplified.json"
+line_url <- "https://raw.githubusercontent.com/GDS-ODSSS/unhcr-dataviz-platform/master/data/geospatial/world_lines_simplified.json"
+
+poly <- read_sf(poly_url) |>
+  st_set_crs(4326) 
+
+line <- read_sf(line_url) |>
+  mutate(
+    type = as_factor(type) |>
+      fct_relevel("solid", "dashed", "dotted", "dashed-dot")
+  ) |>
+  st_set_crs(4326)
+
+# Import World Bank country information
+wb_info <- wb_countries() |> 
+  select(iso3c, income_level) |>
+  filter(income_level != "Aggregates")
+```
+
+## Data formatting
+Filter most recent year, combine refugees, asylum-seekers, and returnees and filter countries.
+```{r}
+# Sum refugees and asylum-seekers
+ref <- ref |>
+  mutate(total = refugees + asylum_seekers)
+
+# Refugee population by country
+ref_country <- ref |>
+  group_by(coa_name, coa_iso) |>
+  summarise(total = sum(total, na.rm = TRUE)) |>
+  ungroup()
+
+# Merge with World Bank country information
+ref_country <- ref_country |>
+  left_join(wb_info, by = c("coa_iso" = "iso3c"))
+
+# Filter only lower and lower-middle income countries
+ref_fds_countries <- ref_country |>
+  filter(income_level %in% c("Low income", "Lower middle income"))
+
+# Filter only countries with refugee population of at least 20.000 
+ref_fds_countries_f <- ref_country |>
+  filter(income_level %in% c("Low income", "Lower middle income"), total >= 20000)
+
+# Total refugee population in selected countries
+ref_fds_countries_total <- ref_fds_countries |>
+  summarise(total = sum(total, na.rm = TRUE)) |> 
+  pull()
+
+# Total refugee population in selected countries after filtering
+ref_fds_countries_total_f <- ref_fds_countries_f |>
+  summarise(total = sum(total, na.rm = TRUE)) |> 
+  pull()
+
+coverage_selected_countries <- percent(ref_fds_countries_total_f/ref_fds_countries_total)
+```
+
+Merge refugee and map data
+```{r}
+poly <- poly |>
+  left_join(ref_fds_countries_f, by = c("color_code" = "coa_iso"))
+
+# Labels
+poly <- poly |>
+  mutate(
+    legend = case_when(
+      total < 1e4 ~ "<10k",
+      total < 1e5 ~ "10k-100k",
+      total < 1e6 ~ "100k-1M",
+      is.na(total) ~ NA_character_,
+      TRUE ~ ">1M"
+    )
+  ) |>
+  mutate(legend = as_factor(legend) |>
+           fct_relevel("<10k", "10k-100k", "100k-1M", ">1M")) |>
+  mutate(
+    income_level = case_when(
+      income_level == "Low income" ~ "Low-income countries",
+      income_level == "Lower middle income" ~ "Lower-middle-income countries"
+    )
+  )
+```
+
+## Plot map
+```{r}
+n_countries_li <- ref_fds_countries_f |> filter(income_level == "Low income") |> summarise(n()) |> pull()
+n_countries_lmi <- ref_fds_countries_f |> filter(income_level == "Lower middle income") |> summarise(n()) |> pull()
+
+box1 <- data.frame(
+  x = c(4),  
+  y = c(3.5), 
+  h = c(3),
+  w = c(6),
+  value = paste0(n_countries_li + n_countries_lmi, " countries"),
+  info = c(
+    paste0(round(ref_fds_countries_total/10e5, 1), "M refugees & asylum-seekers\n \n", coverage_selected_countries, " universe coverage")),
+  color = factor(1)  
+)
+
+box2 <- data.frame(
+  x = c(1.5 - 0.1, 4.5 + 0.1),  
+  y = c(1),
+  h = c(2),
+  w = c(2.9),  
+  value = c(n_countries_li,
+            n_countries_lmi),
+  info = c(
+    "low-income\ncountries",
+    "lower-middle-\nincome countries"
+  ),
+  color = factor(1:2)
+)
+
+plot_box1 <- ggplot(box1, aes(x, y, height = h, width = w, label = info)) +
+  geom_tile(aes(fill = color), alpha = 0.8) +
+  geom_text(color = "white", fontface = "bold", size = 5,
+            aes(label = value, x = x - 2.5, y = y + 1), hjust = 0) +
+  geom_text(color = "white", fontface = "bold", size = 3,
+            aes(label = info, x = x - 2.5, y = y - 0.5), hjust = 0) +
+  coord_fixed() +
+  scale_fill_unhcr_d(palette = "pal_navy") +
+  theme_void() +
+  guides(fill = FALSE)
+
+plot_box2 <- ggplot(box2, aes(x, y, height = h, width = w, label = info)) +
+  geom_tile(aes(fill = color), alpha = 0.8) +
+  geom_text(color = "white", fontface = "bold", size = 5,
+            aes(label = value, x = x - 1.25, y = y + 0.5), hjust = 0) +
+  geom_text(color = "white", fontface = "bold", size = 3,
+            aes(label = info, x = x - 1.25, y = y - 0.3), hjust = 0) +
+  coord_fixed() +
+  scale_fill_unhcr_d(palette = "pal_blue") +
+  theme_void() +
+  guides(fill = FALSE) 
+
+# Without country labels
+plot_map <- ggplot() +
+  geom_sf(data = poly, aes(fill = income_level), color = "transparent") +
+  geom_sf(data = line, aes(linetype = type), color = "white", linewidth = .25, show.legend = FALSE) +
+  labs(caption = "Data from mid-2024. Source: UNHCR Refugee Data Finder - © UNHCR, The UN Refugee Agency.<br>The boundaries and names shown and the designations used on this map do not imply official endorsement or acceptance by the United Nations.") +
+  scale_linetype_manual(values = c(1, 2, 3, 4)) +
+  scale_fill_unhcr_d(palette = "pal_blue") +
+  coord_sf(crs = st_crs("ESRI:54030")) +
+  guides(fill = "none") +
+  theme_unhcr(void = TRUE, legend_text_size = 9) +
+  guides(fill = "none") 
+
+# With country labels. Need to first remove duplicates for countries that have more than one distinct polygon
+# Turn off spherical geometry
+sf::sf_use_s2(FALSE)
+
+unique_poly <- poly %>%
+  distinct(coa_name, .keep_all = TRUE)
+
+# Create the plot with unique labels
+plot_map_lbl <- plot_map + 
+  geom_sf_text_repel(data = unique_poly, aes(label = coa_name), size = 3,
+                     max.overlaps = 100)
+
+
+
+# Combine plots
+boxes <- plot_box1 / plot_box2
+
+fds_refugee_as_map <- plot_map +
+  inset_element(
+    boxes,
+    right = .35,
+    bottom = .3,
+    left = .1,
+    top = 1.1
+  ) 
+
+fds_refugee_as_map_lbl <- plot_map_lbl +
+  inset_element(
+    boxes,
+    right = .35,
+    bottom = .3,
+    left = .1,
+    top = 1.1
+  ) 
+
+```
+
+Save to pdf
+```{r}
+pdf("20241112_priority_countries.pdf", width = 8, height = 4)
+fds_refugee_as_map
+dev.off()
+
+pdf("20241112_priority_countries_labelled.pdf", width = 10, height = 6)
+fds_refugee_as_map_lbl
+dev.off()
+```
+
