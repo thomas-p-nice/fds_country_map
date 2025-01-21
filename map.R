@@ -178,7 +178,7 @@ create_labeled_map <- function(poly, line, boxes) {
     geom_sf_text_repel(
       data = poly %>% distinct(coa_name, .keep_all = TRUE),
       aes(label = coa_name),
-      size = 3,
+      size = 2.5,
       max.overlaps = 100
     )
   
@@ -226,7 +226,7 @@ create_labeled_map <- function(poly, line, boxes) {
 }
 
 # Function to create map with title and boxes
-create_enhanced_map <- function(poly, line, boxes) {
+create_title_map <- function(poly, line, boxes) {
   # Create base map
   main_map <- create_base_map(poly, line)
   
@@ -277,9 +277,8 @@ create_enhanced_map <- function(poly, line, boxes) {
   formatted_threshold <- format(config$min_refugee_threshold, big.mark = ",", scientific = FALSE)
   
   title_text <- "Forced Displacement Survey universe"
-  subtitle_text <- sprintf("Low and lower middle-income countries hosting more than %s refugees and asylum-seekers,
-                          formatted_threshold,
-                          config$year)
+  subtitle_text <- sprintf("Low and lower middle-income countries hosting more than %s refugees and asylum-seekers",
+                          formatted_threshold)
   
   # Final composition
   ggdraw() +
@@ -332,7 +331,7 @@ main <- function(config) {
   list(
     base_map = create_base_map(poly, line),
     labeled_map = create_labeled_map(poly, line, boxes),
-    enhanced_map = create_enhanced_map(poly, line, boxes),
+    title_map = create_title_map(poly, line, boxes),
     poly = poly,
     line = line,
     data = processed_data
@@ -354,10 +353,9 @@ save_outputs <- function(plots, prefix = "priority_countries") {
   )
   
   ggsave(
-    paste0(prefix, "_enhanced.pdf"),
-    plots$enhanced_map,
-    width = 9, height = 5,
-    device = cairo_pdf
+    paste0(prefix, "_title.pdf"),
+    plots$title_map,
+    width = 9, height = 5
   )
 }
 
