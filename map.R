@@ -1,24 +1,22 @@
-```{r}
-# First ensure pacman is installed
+# Load packages
 if (!require("pacman")) install.packages("pacman")
 
-# Load all required packages with p_load
 pacman::p_load(
-  refugees,    # For refugee data
-  wbstats,     # World Bank statistics
-  tidyverse,   # Data manipulation and visualization
-  unhcrthemes, # UNHCR specific themes
-  sf,          # Spatial data handling
-  showtext,    # Font handling
-  patchwork,   # Combining plots
-  httr,        # HTTP requests
-  jsonlite,    # JSON parsing
-  ggrepel,     # Text label repulsion
-  ggsflabel,   # SF labels
-  cowplot     # For drawing plots and labels
+  refugees,    
+  wbstats,     
+  tidyverse,   
+  unhcrthemes, 
+  sf,          
+  showtext,   
+  patchwork, 
+  httr,    
+  jsonlite,   
+  ggrepel,  
+  ggsflabel,  
+  cowplot 
 )
 
-# Add error handling for font loading
+# Load UNHCR font if available
 tryCatch({
   font_add("Lato", regular = "C:/Windows/Fonts/Lato/Lato-Medium.ttf")
   showtext_auto()
@@ -26,7 +24,7 @@ tryCatch({
   warning("Could not load Lato font. Falling back to system font.")
 })
 
-# Create configuration parameters
+# Set up parameters - can be adapted as needed
 config <- list(
   year = 2024,
   min_refugee_threshold = 20000,
@@ -51,7 +49,6 @@ fetch_refugee_data <- function(year, base_url) {
     as.data.frame(lapply(x, as.character), stringsAsFactors = FALSE)
   }))
   
-  # More careful numeric conversion with warning suppression
   suppressWarnings({
     df %>%
       mutate(
@@ -103,7 +100,7 @@ create_base_map <- function(poly, line) {
     labs(caption = "Data from mid-2024. Source: UNHCR Refugee Data Finder - © UNHCR, The UN Refugee Agency.<br>The boundaries and names shown and the designations used on this map do not imply official endorsement or acceptance by the United Nations.") +
     scale_linetype_manual(values = c(1, 2, 3, 4)) +
     scale_fill_unhcr_d(palette = "pal_blue") +
-    coord_sf(crs = st_crs("ESRI:54030")) +
+    coord_sf(crs = st_crs("ESRI:54030"), expand = FALSE) +
     theme_unhcr(void = TRUE, legend_text_size = 9) +
     guides(fill = "none")
 }
@@ -120,13 +117,13 @@ create_info_boxes <- function(data) {
     box1 = data.frame(
       x = 4, y = 3.5, h = 3, w = 6,
       value = paste0(sum(n_countries$n), " countries"),
-      info = sprintf("%.1fM refugees & asylum-seekers\n", total_refugees/10e5),
+      info = sprintf("%.1fM refugees &\nasylum-seekers\n", total_refugees/10e5),
       color = factor(1)
     ),
     box2 = data.frame(
       x = c(1.4, 4.6),
       y = 1,
-      h = 2,
+      h = 2.2,
       w = 2.9,
       value = n_countries$n,
       info = c("low-income\ncountries", "lower-middle-\nincome countries"),
@@ -137,7 +134,7 @@ create_info_boxes <- function(data) {
 
 # Function to create infographic elements
 create_infographic <- function(data) {
-  # Calculate key statistics
+  # Calculate key stats
   stats <- list(
     total_refugees = sum(data$total, na.rm = TRUE),
     n_countries = nrow(data),
@@ -146,10 +143,8 @@ create_infographic <- function(data) {
   )
   
   ggplot() +
-    # Background
     geom_rect(aes(xmin = 0, xmax = 10, ymin = 0, ymax = 2),
               fill = "#18375F", alpha = 0.1) +
-    # Total refugees circle
     geom_point(aes(x = 2, y = 1), size = 30, color = "#0072BC", alpha = 0.8) +
     geom_text(aes(x = 2, y = 1.2),
               label = sprintf("%.1fM", stats$total_refugees/1e6),
@@ -179,7 +174,6 @@ create_infographic <- function(data) {
 
 # Function to create labeled map
 create_labeled_map <- function(poly, line, boxes) {
-  # Create base map with labels
   base_map <- create_base_map(poly, line) +
     geom_sf_text_repel(
       data = poly %>% distinct(coa_name, .keep_all = TRUE),
@@ -211,7 +205,7 @@ create_labeled_map <- function(poly, line, boxes) {
       aes(label = value, x = x - 1.25, y = y + 0.5), hjust = 0
     ) +
     geom_text(
-      color = "white", fontface = "bold", size = 3,
+      color = "white", fontface = "bold", size = 2.5,
       aes(label = info, x = x - 1.25, y = y - 0.3), hjust = 0
     ) +
     coord_fixed() +
@@ -231,8 +225,7 @@ create_labeled_map <- function(poly, line, boxes) {
     )
 }
 
-# Enhanced map creation function with title and infographic
-# Enhanced map creation function with formatted numbers in subtitle
+# Function to create map with title and boxes
 create_enhanced_map <- function(poly, line, boxes) {
   # Create base map
   main_map <- create_base_map(poly, line)
@@ -260,7 +253,7 @@ create_enhanced_map <- function(poly, line, boxes) {
       aes(label = value, x = x - 1.25, y = y + 0.5), hjust = 0
     ) +
     geom_text(
-      color = "white", fontface = "bold", size = 3,
+      color = "white", fontface = "bold", size = 2.5,
       aes(label = info, x = x - 1.25, y = y - 0.3), hjust = 0
     ) +
     coord_fixed() +
@@ -280,37 +273,36 @@ create_enhanced_map <- function(poly, line, boxes) {
       top = 1.1
     )
   
-  # Format the threshold number with thousand separator
+  # Format threshold number with thousand separator
   formatted_threshold <- format(config$min_refugee_threshold, big.mark = ",", scientific = FALSE)
   
-  title_text <- "Refugee-Hosting Low and Lower-Middle Income Countries"
-  subtitle_text <- sprintf("Countries hosting more than %s refugees and asylum-seekers, mid-%d",
+  title_text <- "Forced Displacement Survey universe"
+  subtitle_text <- sprintf("Low and lower middle-income countries hosting more than %s refugees and asylum-seekers,
                           formatted_threshold,
                           config$year)
   
-  # Final composition with title
+  # Final composition
   ggdraw() +
-    # Add title
+    draw_plot(map_with_boxes,
+             x = 0, y = 0,
+             width = 1, height = .9)  +
     draw_label(title_text,
-              x = 0.02, y = 0.98,
+              x = .02, y = .95,
               hjust = 0, vjust = 1,
               fontface = "bold",
               size = 16,
-              color = "#18375F") +
-    # Add subtitle
+              color = "#18375F",
+              fontfamily = "Lato") +
     draw_label(subtitle_text,
-              x = 0.02, y = 0.94,
+              x = 0.02, y = .90,
               hjust = 0, vjust = 1,
               size = 12,
-              color = "#18375F") +
-    # Add map with boxes
-    draw_plot(map_with_boxes,
-             x = 0, y = 0,
-             width = 1, height = 0.88)
+              color = "#18375F",
+              fontfamily = "Lato")
 }
 
 
-# Main execution function
+# Function to process all
 main <- function(config) {
   # Fetch and process data
   ref_data <- fetch_refugee_data(config$year, config$api_base_url)
@@ -347,25 +339,24 @@ main <- function(config) {
   )
 }
 
-# Save all outputs
+# Save outputs
 save_outputs <- function(plots, prefix = "priority_countries") {
-  # Save all versions
   ggsave(
     paste0(prefix, ".pdf"),
     plots$base_map,
-    width = 8, height = 4
+    width = 9, height = 5
   )
   
   ggsave(
     paste0(prefix, "_labeled.pdf"),
     plots$labeled_map,
-    width = 10, height = 6
+    width = 9, height = 5
   )
   
   ggsave(
     paste0(prefix, "_enhanced.pdf"),
     plots$enhanced_map,
-    width = 11, height = 7,
+    width = 9, height = 5,
     device = cairo_pdf
   )
 }
@@ -373,5 +364,3 @@ save_outputs <- function(plots, prefix = "priority_countries") {
 # Run the script
 plots <- main(config)
 save_outputs(plots)
-```
-
